@@ -6,10 +6,6 @@
 #define SERVICE_UUID        "0000fff0-0000-1000-8000-00805f9b34fb"
 #define CHARACTERISTIC_UUID "0000fff2-0000-1000-8000-00805f9b34fb"
 
-uint8_t raw_adv_bytes[] = {
-  0x02, 0x01, 0x06,                                      // Flags
-  0x08, 0xFF, 0xF8, 0x8F, 0xC8, 0x9E, 0xF2, 0xD0, 0x00   // Manufacturer Data
-};
 
 BLEServer* pServer = nullptr;
 BLECharacteristic* pCharacteristic = nullptr;
@@ -17,13 +13,7 @@ bool deviceConnected = false;
 
 void startCustomAdvertising() {
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
-  
-  std::string advDataStr((char*)raw_adv_bytes, sizeof(raw_adv_bytes));
-  oAdvertisementData.addData(advDataStr);
-  
-  pAdvertising->setAdvertisementData(oAdvertisementData);
-  pAdvertising->setScanResponse(true); // Wichtig, damit der Master die Verbindung einleiten kann
+
   pAdvertising->setMinPreferred(0x06);
   pAdvertising->setMinPreferred(0x12);
   
