@@ -6,10 +6,12 @@
 #define SERVICE_UUID        "0000fff0-0000-1000-8000-00805f9b34fb"
 #define CHARACTERISTIC_UUID "0000fff2-0000-1000-8000-00805f9b34fb"
 
+const uint8_t mac_address[] = { 0xF8, 0x8F, 0xC8, 0x9E, 0xF2, 0xD0 };
+
+const uint8_t calibration_sequence[] = { 0x7F, 0xFF, 0xFF, 0xFF, 0xFF };
 
 BLEServer* pServer = nullptr;
 BLECharacteristic* pCharacteristic = nullptr;
-bool deviceConnected = false;
 
 void startCustomAdvertising() {
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
@@ -17,6 +19,7 @@ void startCustomAdvertising() {
   pAdvertising->setMinPreferred(0x06);
   pAdvertising->setMinPreferred(0x12);
   
+  Serial.println("Start advertising...");
   BLEDevice::startAdvertising();
 }
 
@@ -42,19 +45,16 @@ int32_t decodeLcdSegmentCodeValue(const uint8_t *data, size_t length) {
     return value;
 }
 
-const uint8_t calibrationValue[] = { 0x7F, 0xFF, 0xFF, 0xFF, 0xFF };
-
 class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) {
         uint8_t* pData = pChar->getData();
         size_t length = pChar->getLength();
-
         if (length >= 11) {
-            if (memcmp(pData + 7, calibrationValue, sizeof(calibrationValue))) {
+            if (memcmp(pData + 7, calibration_sequence, sizeof(calibration_sequence))) {
               int32_t value = decodeLcdSegmentCodeValue(pData + 7, 5);
               Serial.printf("%d\t%0.1f g\n", millis(), value / 10.0);
             } else {
-              Serial.println("Kalibriere...\n");
+              Serial.println("Calibrating...");
             }
         }
     }
@@ -63,36 +63,28 @@ class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      Serial.println("\n-> [CONNECT] Master hat die Verbindung aufgebaut!");
+      Serial.println("Connected");
     }
 
     void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      Serial.println("\n-> [DISCONNECT] Master hat die Verbindung getrennt.");
-      
-      delay(500);
+      Serial.println("Disconnected");
       startCustomAdvertising();
-      Serial.println("-> [ADV] Sende wieder Custom Raw Advertisements... Warte auf Master.");
     }
 };
 
 void setup() {
   Serial.begin(115200);
 
-  uint8_t base_mac[] = {0xF8, 0x8F, 0xC8, 0x9E, 0xF2, 0xCE};
+  uint8_t base_mac[] = { mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5] - 2 };
   
   esp_err_t err = esp_base_mac_addr_set(base_mac);
-  if (err == ESP_OK) {
-    Serial.println("[MAC] Basis-MAC-Adresse erfolgreich im RAM geändert.");
-  } else {
-    Serial.printf("[MAC] FEHLER beim Ändern der MAC: 0x%X\n", err);
+  if (err != ESP_OK) {
+    Serial.printf("ERROR: esp_base_mac_addr_set failed with 0x%X\n", err);
   }
 
-
   BLEDevice::init("NerdCoff");
-  Serial.print("[MAC] Aktive emulierte BLE-Adresse: ");
-  Serial.println(BLEDevice::getAddress().toString().c_str()); 
+
+  Serial.printf("Using mac address %s\n", BLEDevice::getAddress().toString().c_str());
 
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -111,7 +103,6 @@ void setup() {
   pService->start();
 
   startCustomAdvertising();
-  Serial.println("[ADV] Custom Raw Advertisements aktiv! Warte auf einkommende Verbindung vom Master...");
 }
 
 void loop() {
