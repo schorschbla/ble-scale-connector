@@ -3,11 +3,9 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 
-// 1. UUIDs definieren
 #define SERVICE_UUID        "0000fff0-0000-1000-8000-00805f9b34fb"
 #define CHARACTERISTIC_UUID "0000fff2-0000-1000-8000-00805f9b34fb"
 
-// Ihr exakter, gewünschter Raw Advertisement Payload (12 Bytes)
 uint8_t raw_adv_bytes[] = {
   0x02, 0x01, 0x06,                                      // Flags
   0x08, 0xFF, 0xF8, 0x8F, 0xC8, 0x9E, 0xF2, 0xD0, 0x00   // Manufacturer Data
@@ -17,12 +15,10 @@ BLEServer* pServer = nullptr;
 BLECharacteristic* pCharacteristic = nullptr;
 bool deviceConnected = false;
 
-// Hilfsfunktion für das Custom-Advertising
 void startCustomAdvertising() {
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   BLEAdvertisementData oAdvertisementData = BLEAdvertisementData();
   
-  // Byte-Array in einen Binär-String umwandeln und übergeben
   std::string advDataStr((char*)raw_adv_bytes, sizeof(raw_adv_bytes));
   oAdvertisementData.addData(advDataStr);
   
@@ -56,21 +52,25 @@ int32_t decodeLcdSegmentCodeValue(const uint8_t *data, size_t length) {
     return value;
 }
 
-// 2. DATEN-CALLBACK: Hier landen die unaufgeforderten Schreibbefehle des Masters
+const uint8_t calibrationValue[] = { 0x7F, 0xFF, 0xFF, 0xFF, 0xFF };
+
 class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) {
-        // Daten aus der Characteristic auslesen
         uint8_t* pData = pChar->getData();
         size_t length = pChar->getLength();
 
         if (length >= 11) {
-            int32_t value = decodeLcdSegmentCodeValue(pData + 7, 5);
-            Serial.printf("%0.1f g\n", value / 10.0);
+            if (memcmp(pData + 7, calibrationValue, sizeof(calibrationValue))) {
+              int32_t value = decodeLcdSegmentCodeValue(pData + 7, 5);
+              Serial.printf("%d\t%0.1f g\n", millis(), value / 10.0);
+            } else {
+              Serial.println("Kalibriere...\n");
+            }
         }
     }
 };
 
-// 3. Callbacks für den Verbindungsstatus
+
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
@@ -81,7 +81,6 @@ class MyServerCallbacks: public BLEServerCallbacks {
       deviceConnected = false;
       Serial.println("\n-> [DISCONNECT] Master hat die Verbindung getrennt.");
       
-      // Sofort das Custom-Advertising neu starten, damit der Master wieder verbinden kann
       delay(500);
       startCustomAdvertising();
       Serial.println("-> [ADV] Sende wieder Custom Raw Advertisements... Warte auf Master.");
@@ -90,13 +89,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("=================================================");
-  Serial.println("ESP32 BLE: Custom MAC + Adv -> Direct Connection ");
-  Serial.println("=================================================");
 
-  // 1. BLE-Adresse fälschen (Spoofing)
-  // Gewünschte BLE-Adresse: F8:8F:C8:9E:F2:D0 (Intern -2 verschoben -> CE)
   uint8_t base_mac[] = {0xF8, 0x8F, 0xC8, 0x9E, 0xF2, 0xCE};
   
   esp_err_t err = esp_base_mac_addr_set(base_mac);
@@ -106,20 +99,16 @@ void setup() {
     Serial.printf("[MAC] FEHLER beim Ändern der MAC: 0x%X\n", err);
   }
 
-  // 2. BLE-Stack initialisieren (Nimmt die gefälschte Adresse an)
-  BLEDevice::init("");
+
+  BLEDevice::init("NerdCoff");
   Serial.print("[MAC] Aktive emulierte BLE-Adresse: ");
   Serial.println(BLEDevice::getAddress().toString().c_str()); 
 
-  // 3. BLE Server erstellen & Callbacks zuweisen
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  // 4. BLE Service erstellen
   BLEService *pService = pServer->createService(SERVICE_UUID);
 
-  // 5. Characteristic (0xfff2) erstellen
-  // Wir erlauben dem Master hier Read und Write (mit und ohne Antwort)
   pCharacteristic = pService->createCharacteristic(
                       CHARACTERISTIC_UUID,
                       BLECharacteristic::PROPERTY_READ  |
@@ -127,18 +116,14 @@ void setup() {
                       BLECharacteristic::PROPERTY_WRITE_NR
                     );
 
-  // Daten-Callback an die Characteristic hängen
   pCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
 
-  // 6. Service starten
   pService->start();
 
-  // 7. Custom Advertising starten
   startCustomAdvertising();
   Serial.println("[ADV] Custom Raw Advertisements aktiv! Warte auf einkommende Verbindung vom Master...");
 }
 
 void loop() {
-  // Keine periodischen Aktionen nötig – alles passiert ereignisbasiert in den Callbacks.
   delay(1000);
 }
